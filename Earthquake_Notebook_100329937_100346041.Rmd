@@ -1,0 +1,942 @@
+---
+title: "R Notebook (Earthquake)"
+output:
+  html_document:
+    df_print: paged
+---
+
+Autores: Eduardo Ureña Toledano - 100329937 y Alfonso Lopez-Contreras Martín - 100346041
+
+Lo primero que hacemos es cargar todas las librerías que vamos a utilizar.
+```{r}
+library(FSA)
+library(Rmisc)
+library(psych)
+library(boot)
+library(rcompanion)
+library(e1071)
+library(fitdistrplus)
+library(ggpubr)
+library("car")
+library(nortest)
+library(classInt)
+library(gridExtra)
+library(plotly)
+library(ltm)
+library(polycor)
+library(descr)
+library(vcd)
+library(leaps)
+library(relaimpo)
+library(FSelector)
+library(caret)
+library(factoextra)
+library(FactoMineR)
+library(nFactors)
+library(cluster)
+library(stats)
+library(forecast)
+library(Metrics)
+library(tsoutliers)
+library(bfast)
+```
+
+Cargamos el fichero de datos y lo convertimos a dataframe.
+```{r}
+dfMedidas <- read.csv("earthquake.csv", sep = ",", dec = ".", header = TRUE)
+```
+```{r}
+dfMedidas
+```
+
+Tenemos datos de las siguientes medidas de terremotos:
+
+- md: Magnitud de duración.
+
+- richter: Escala de richter.
+
+- mw: Magnitud de energía. 
+
+- ms: Magnitud de ondas superficiales.
+
+- mb: Magnitud de ondas de volumen.
+
+- xm: max(md,richter,mw,ms,mb)
+
+Vamos a usar siempre que sea posible la medida xm, ya que es el valor máximo de las demás medidas, y siempre hay datos para ella.
+
+Calculamos la media, mediana, desviación estándar, valor máximo y mínimo, cuartiles y error estandar de la media para los valores de xm.
+```{r}
+mean(dfMedidas$xm) #Cálculo de la Media para xm 
+```
+```{r}
+median(dfMedidas$xm) #Cálculo de la Mediana para xm
+```
+```{r}
+sd(dfMedidas$xm) #Cálculo de la Desviación estándar para xm
+```
+```{r}
+range(dfMedidas$xm) #Valor máximo y mínimo de xm
+```
+```{r}
+quantile(dfMedidas$xm) #Cuartiles para xm
+```
+```{r}
+sd(dfMedidas$xm) /sqrt(length(dfMedidas$xm)) #Error estándar de la media para mx
+```
+
+Calculamos la Media de los valores de xm en cada país o región.
+```{r}
+tapply(dfMedidas$xm, dfMedidas$country, mean)
+```
+
+Calculamos el número de terremotos que hay en cada país o región, junto a la media, desviación estándar, mediana, valor mínimo y máximo, y cuartiles del valor de la medida xm para cada país o región.
+```{r}
+Summarize(xm ~ country, data = dfMedidas)
+```
+
+Calculamos esas medidas y alguna más pero con describeBy.
+```{r}
+describeBy(dfMedidas$xm, group = dfMedidas$country, digits= 4)
+```
+
+Calculamos la media de los valores de xm con un intervalo de confianza del 95%
+```{r}
+CI(dfMedidas$xm, ci = 0.95)
+```
+
+calculamos la desviación absoluta media, la desviación estándar y el rango intercuartil para los valores de xm, respecto a albania, grecia, mediterraneo y turquía.
+```{r}
+mad(dfMedidas[which(dfMedidas$country == "albania"), "xm"]) #desviación absoluta media respecto a albania
+```
+```{r}
+mad(dfMedidas[which(dfMedidas$country == "greece"), "xm"]) #desviación absoluta media respecto a grecia
+```
+```{r}
+mad(dfMedidas[which(dfMedidas$country == "mediterranean"), "xm"]) #desviación absoluta media respecto al mediterraneo
+```
+```{r}
+mad(dfMedidas[which(dfMedidas$country == "turkey"), "xm"]) #desviación absoluta media respecto a turquia
+```
+```{r}
+sd(dfMedidas[which(dfMedidas$country == "albania"), "xm"]) #desviación estándar respecto a albania
+```
+```{r}
+sd(dfMedidas[which(dfMedidas$country == "greece"), "xm"]) #desviación estándar respecto a grecia
+```
+```{r}
+sd(dfMedidas[which(dfMedidas$country == "mediterranean"), "xm"]) #desviación estándar respecto al mediterraneo
+```
+```{r}
+sd(dfMedidas[which(dfMedidas$country == "turkey"), "xm"]) #desviación estándar respecto a turquia
+```
+```{r}
+IQR(dfMedidas[which(dfMedidas$country == "albania"), "xm"]) #rango intercuartil respecto a albania
+```
+```{r}
+IQR(dfMedidas[which(dfMedidas$country == "greece"), "xm"]) #rango intercuartil respecto a grecia
+```
+```{r}
+IQR(dfMedidas[which(dfMedidas$country == "mediterranean"), "xm"]) #rango intercuartil respecto al mediterraneo
+```
+```{r}
+IQR(dfMedidas[which(dfMedidas$country == "turkey"), "xm"]) #rango intercuartil respecto a turquia
+```
+
+Comprobamos que tal se ajustan los valores de xm a una función normal para albania, grecia, mediterraneo y turquía.
+```{r}
+plotNormalHistogram(dfMedidas[which(dfMedidas$country == "albania"), "xm"])
+```
+```{r}
+plotNormalHistogram(dfMedidas[which(dfMedidas$country == "greece"), "xm"])
+```
+```{r}
+plotNormalHistogram(dfMedidas[which(dfMedidas$country == "mediterranean"), "xm"])
+```
+```{r}
+plotNormalHistogram(dfMedidas[which(dfMedidas$country == "turkey"), "xm"])
+```
+
+Como se puede ver no se pueden ajustar a una normal.
+
+Intentamos conseguir una mayor aproximación a los datos de xm para el mediterráneo, por medio de asimetría estadística (skewness).
+```{r}
+op <- par(mar = c(3, 3, 4, 2) + 0.1)
+```
+```{r}
+hist(dfMedidas[which(dfMedidas$country == "mediterranean"), "xm"], col = "light blue", probability=TRUE, main = paste("skewness =", round(skewness(dfMedidas[which(dfMedidas$country == "mediterranean"), "xm"]), digits=2)),xlab="", ylab="")
+lines(density(dfMedidas[which(dfMedidas$country == "mediterranean"), "xm"]), col ="red", lwd = 5)
+rug(dfMedidas[which(dfMedidas$country == "mediterranean"), "xm"], col ="green", lwd = 3)
+par(op)
+```
+```{r}
+skewness(dfMedidas[which(dfMedidas$country == "mediterranean"), "xm"])
+```
+Se aprecia una mejor aproximación.
+
+Por medio de la medida de curtosis vemos si los datos se extienden más o menos que la normal en las colas y si hay mayor densidad alrededor del valor medio. En este caso seguimos viéndolo para los terremotos del mediterraneo.
+```{r}
+xm_mediterranean <- dfMedidas[which(dfMedidas$country == "mediterranean"), "xm"]
+```
+```{r}
+qqnorm(xm_mediterranean, main = paste("curtosis =", round(kurtosis(xm_mediterranean), digits = 2), "(gaussian)"))
+qqline(xm_mediterranean, col = "red")
+op <- par(fig=c(0.02, 0.5, 0.5, 0.98), new = TRUE)
+hist(xm_mediterranean, probability=T, col="light blue", xlab = "", ylab = "", main = "", axes = FALSE)
+lines(density(xm_mediterranean), col = "red", lwd=2)
+box()
+par(op)
+```
+
+Comprobamos a que función de distribución se asemejan más nuestros datos de los terremotos con el valor de xm ocurridos en el mediterraneo. 
+```{r}
+descdist(xm_mediterranean, discrete = FALSE)
+```
+Como se puede apreciar se acerca bastante a la función gamma, por lo que se podría aproximar a dicha función, o bien a la función beta.
+
+Comprobamos la bondad del ajuste a una función normal de nuestros datos en el mediterráneo, mediante el test de Shapiro-Wilk.
+```{r}
+shapiro.test(xm_mediterranean)
+```
+
+Como se puede apreciar el p-value está muy por debajo de 0,05, por lo que no se puede considerar que se asemeje en absoluto a una normal.
+
+Hacemos una gráfica Q-Q de los datos del mediterráneo para ver visualmente si se puede asemejar a una normal, y vemos definitivamente que no, ya que los valores casi nunca entran en el intervalo de confianza.
+```{r}
+ggqqplot(xm_mediterranean) #gráfica Q-Q
+```
+
+Hacemos otra gráfica Q-Q, pero en este caso para todas las regiones o países.
+```{r}
+qqPlot(dfMedidas$xm) #La misma gráfica Q-Q pero con otra librería y en general 
+```
+
+Se observa que los valores tampoco se pueden asemejar a una normal.
+
+Para más seguridad, realizamos las pruebas de Anderson-Darling, Cramér-von Mises y Kolmogorov-
+Smirnov para los terremotos acontecidos en el mediterráneo por un lado, y en todos los países o regiones por otro. 
+```{r}
+ad.test(xm_mediterranean)
+```
+```{r}
+cvm.test(xm_mediterranean)
+```
+```{r}
+lillie.test(xm_mediterranean)
+```
+```{r}
+ad.test(dfMedidas$xm)
+```
+```{r}
+cvm.test(dfMedidas$xm)
+```
+```{r}
+lillie.test(dfMedidas$xm)
+```
+
+Todas las pruebas indican que los valores no se pueden aproximar a una normal, al tener un p-value mucho menor de 0,05.
+
+Determinamos tres tipos de alertas (amarilla, naranja y roja) y discretizamos los valores de xm en el mediterráneo.
+```{r}
+xm_mediterranean_alert <- classIntervals(xm_mediterranean, n = 3, style = "fixed",fixedBreaks = c(2.9, 4.5, 6.0, 7.9), intervalClosure = "left") # Frecuencias de las alertas
+plot(xm_mediterranean_alert, pal = c("yellow", "orange", "red"), main = "xm_mediterranean")
+```
+
+Vemos una posibilidad de 151,532,656,696 posibles particiónes de los valores de xm en intervalos.
+```{r}
+(classIntervals(dfMedidas$xm, style = "fisher", intervalClosure = "left"))
+```
+
+Vemos Una de las 903 posibles particiones de los datos de mx en 3 intervalos.
+```{r}
+(classIntervals(dfMedidas$xm, n = 3, style = "quantile", intervalClosure = "left"))
+```
+
+Dividimos la profundidad en 5 intervalos después de hacer varias pruebas y determinar cómo óptimo dicho número de particiones, y añadimos una nueva columna con esos intervalos.
+```{r}
+depthInterval <- dfMedidas$depth
+```
+```{r}
+depthInterval[dfMedidas$depth < 7] <- "[0,7)"
+depthInterval[dfMedidas$depth >= 7 & dfMedidas$depth < 15] <- "[7,15)"
+depthInterval[dfMedidas$depth >= 15 & dfMedidas$depth < 36] <- "[15,36)"
+depthInterval[dfMedidas$depth >= 36 & dfMedidas$depth < 78] <- "[36,78)"
+depthInterval[dfMedidas$depth >= 78 & dfMedidas$depth <= 225] <- "[78,225]"
+```
+```{r}
+dfMedidas <- cbind(dfMedidas[1:10],depthInterval,dfMedidas[11:17])
+```
+
+Hacemos un histograma para cada intervalo de profundidad, para ver que tal se aproximan los valores de la medida xm a una normal teniendo en cuenta su profundidad.
+```{r}
+plotNormalHistogram(dfMedidas[which(dfMedidas$depthInterval == "[0,7)"), "xm"])
+```
+```{r}
+plotNormalHistogram(dfMedidas[which(dfMedidas$depthInterval == "[7,15)"), "xm"])
+```
+```{r}
+plotNormalHistogram(dfMedidas[which(dfMedidas$depthInterval == "[15,36)"), "xm"])
+```
+```{r}
+plotNormalHistogram(dfMedidas[which(dfMedidas$depthInterval == "[36,78)"), "xm"])
+```
+```{r}
+plotNormalHistogram(dfMedidas[which(dfMedidas$depthInterval == "[78,225]"), "xm"])
+```
+Se puede apreciar que los datos no se asemejan nada o casi nada a una normal en ningún intervalo. 
+
+Vemos a que función o funciones se pueden aproximar los datos de cada intervalo:
+
+Se aprecia que en el intervalo de profundidad entre 0 y 7, los valores se pueden aproximar muy bien a una función gamma.
+```{r}
+descdist(dfMedidas[which(dfMedidas$depthInterval == "[0,7)"), "xm"])
+```
+
+Se aprecia que en el intervalo de profundidad entre 7 y 15, los valores se pueden aproximar a una función beta y esta algo cerca de una gamma.
+```{r}
+descdist(dfMedidas[which(dfMedidas$depthInterval == "[7,15)"), "xm"])
+```
+
+Se aprecia que en el intervalo de profundidad entre 15 y 36, los valores también se pueden aproximar una función beta y algo a una gamma y está más cerca que el anterior de una lognormal.
+```{r}
+descdist(dfMedidas[which(dfMedidas$depthInterval == "[15,36)"), "xm"])
+```
+
+Se aprecia que en el intervalo de profundidad entre 36 y 78, los valores se pueden aproximar una función gamma y a una lognormal, y es el que está más cerca de una normal.
+```{r}
+descdist(dfMedidas[which(dfMedidas$depthInterval == "[36,78)"), "xm"])
+```
+
+Se aprecia que en el intervalo de profundidad entre 78 y 225, los valores se pueden aproximar una función beta y se acercan a la gamma.
+```{r}
+descdist(dfMedidas[which(dfMedidas$depthInterval == "[78,225]"), "xm"])
+```
+
+
+Hacemos un diagrama de dispersión con diferentes técnicas, de xm en función de la profundidad.
+```{r}
+par(mfrow=c(1,1))
+plot(dfMedidas$depth, dfMedidas$xm, main="Diagrama de Dispersión", xlab="Profundidad en metros", ylab="xm", pch=19)
+abline(lm(dfMedidas$xm ~ dfMedidas$depth), col = "red") # regresión (y~x)
+smoothScatter(dfMedidas$depth, dfMedidas$xm,xlab="Profundidad en metros", ylab="xm", cex= 2,colramp = colorRampPalette(c("white", "blue"), space = "Lab"))
+```
+```{r}
+scatterplot(xm ~ depth, data = dfMedidas, main ="Diagrama de Dispersión", xlab ="Profundidad en metros", ylab ="xm", ellipse = TRUE, lwd = 2, lty= 2)
+```
+```{r}
+scatter.hist(dfMedidas$depth, dfMedidas$xm, main ="Diagrama de Dispersión", xlab ="Profundidad en metros", ylab ="xm")
+#Igual que la anterior, pero con histogramas y coeficiente de regresión
+```
+Se puede apreciar que por lo general, la mayoría de terremotos se producen a poca o media profundidad, y en la mayoría de los casos tienen una medida xm menor de ~ 5.5.
+
+Correlación entre todas las medidas de terremotos (Sin tener en cuenta los ceros).
+```{r}
+scatterplotMatrix(~ md[which((dfMedidas$md>0)&(dfMedidas$richter>0)&(dfMedidas$mw>0)&(dfMedidas$ms>0)&(dfMedidas$mb>0))] + richter[which((dfMedidas$md>0)&(dfMedidas$richter>0)&(dfMedidas$mw>0)&(dfMedidas$ms>0)&(dfMedidas$mb>0))] + mw[which((dfMedidas$md>0)&(dfMedidas$richter>0)&(dfMedidas$mw>0)&(dfMedidas$ms>0)&(dfMedidas$mb>0))] + ms[which((dfMedidas$md>0)&(dfMedidas$richter>0)&(dfMedidas$mw>0)&(dfMedidas$ms>0)&(dfMedidas$mb>0))] + mb[which((dfMedidas$md>0)&(dfMedidas$richter>0)&(dfMedidas$mw>0)&(dfMedidas$ms>0)&(dfMedidas$mb>0))], data = dfMedidas)
+```
+
+Como se puede apreciar hay bastante correlación entre todas ellas, lo que nos reafirma en nuestra decisión de usar siempre la medida xm.
+
+Calculamos la covarianza y correlación de la profundidad con la medida xm.
+```{r}
+cov(dfMedidas$depth, dfMedidas$xm)
+```
+```{r}
+cor(dfMedidas$depth, dfMedidas$xm)
+```
+
+Se aprecia poca correlación, ya que esta es menor de 0.4, que es cuando se empezaría a considerar moderada, aunque se puede apreciar que cuando la profundidad aumenta, la escala xm de los terremotos que se producen a esa profundidad, también aumenta al ser positiva la covarianza.
+
+Se usa la función hetcor para calcular las correlaciones de xm con la latitud, longitud y profundidad, usando para cada una el tipo de correlación que le corresponde, siendo usada en este caso siempre la de Pearson.
+```{r}
+hetcor(dfMedidas$xm, dfMedidas$lat, dfMedidas$long, dfMedidas$depth, dfMedidas$dist)
+```
+
+Se puede apreciar que la correlación con las demás variables es incluso peor que con la profundidad.
+
+Creamos diferentes intervalos de xm en función de lo que pensamos que consideramos como un terremoto débil, uno medio o uno fuerte, y añadimos una columna en el dataframe con dichos intervalos.
+```{r}
+xm_Interval <- dfMedidas$xm
+```
+```{r}
+xm_Interval[dfMedidas$xm < 4.5] <- "[3.5,4.5)"
+xm_Interval[dfMedidas$xm >= 4.5 & dfMedidas$xm < 6] <- "[4.5,6)"
+xm_Interval[dfMedidas$xm >= 6 & dfMedidas$xm <= 7.9] <- "[6,7.9]"
+```
+```{r}
+dfMedidas <- cbind(dfMedidas[1:12],xm_Interval,dfMedidas[13:18])
+```
+
+Vemos la proporción de terremotos que hay en cada intervalo de xm, y la proporción de cada intervalo de xm en función de cada intervalo de profundidad. 
+```{r}
+freq(xm_Interval, plot=FALSE) #frecuencias marginales
+round(prop.table(table(depthInterval, xm_Interval), 2), 2) #tabla de contingencia
+```
+
+Obtenemos dos tablas, una con el número de terremotos esperados por chi cuadrado en cada intervalo y otra con el numero real de terremotos
+```{r}
+round(chisq.test(table(depthInterval, xm_Interval))$expected, 0) #esperada
+table(depthInterval, xm_Interval) #real
+```
+
+Hacemos el test de chi cuadrado y luego representamos los valores que nos da, viendo si los valores aciertan o fallan respecto a lo esperado.
+```{r}
+chisq.test(table(depthInterval, xm_Interval))
+```
+
+El valor de p-value es < 2.2e-16, por lo que es mucho menor de 0.05 y por tanto se puede rechazar la hipótesis nula, y afirmar que existe una relación significativa entre xm y la profundidad.
+
+Obtenemos una tabla en la que se puede obsevar la probabilidad de que un terremoto tenga una escala perteneciente a un intervalo determinado, sabiendo que se produce en un determinado intervalo de profundidad.
+```{r}
+assoc(table(depthInterval, xm_Interval), shade=TRUE)
+```
+
+Se observa que:
+
+- Para profundidad entre 0 y 7, es bastante probable que se produzcan terremotos de entre 3.5 y 4.5, muy probale que no se produzcan de medidas entre 4.5 y 6, y probablemente tampoco se producirán de entre 6 y 7.9.
+
+- Para profundidad entre 7 y 15, tenemos un escenario parecido al anterior.
+
+- Para profundidad entre 15 y 36, es bastante probable que no se produzcan terremotos de entre 3.5 y 4.5, muy probale que se produzcan de medidas entre 4.5 y 6, y algo probable que se produzcan algunos de entre 6 y 7.9.
+
+- Para profundidad entre 36 y 78, es bastante probable que no se produzcan terremotos de entre 3.5 y 4.5, muy probale que se produzcan de medidas entre 4.5 y 6, y es en el intervalo de produndidad donde es más probable que se produzcan terremotos de entre 6 y 7.9, aunque sigue siendo poca, al haber tan poca cantidad de de terremotos con esas medidas.
+
+- Para profundidad entre 78 y 225, es probable que no se produzcan terremotos de entre 3.5 y 4.5, bastante probable que se produzcan de medidas entre 4.5 y 6, y algo probable que se produzcan algunos de entre 6 y 7.9.
+
+
+Creamos 2 nuevas columnas: una para guardar los años, y otra para guardar los meses.
+```{r}
+year <- substring(dfMedidas$date, 1, 4)
+```
+```{r}
+dfMedidas <- cbind(dfMedidas[1],year,dfMedidas[2:19])
+```
+```{r}
+month <- substring(dfMedidas$date, 6, 7)
+```
+```{r}
+dfMedidas <- cbind(dfMedidas[1:2],month,dfMedidas[3:20])
+```
+
+Dibujamos un histograma y una distribución de densidad con los diferentes valores de xm, poniendo la línea roja en 6, que es lo que consideramos un terremoto grave.
+```{r}
+qplot(dfMedidas$xm, data=dfMedidas, geom="density", alpha=I(.5)) + xlab(bquote(xm)) + geom_histogram(fill = "#4271AE", colour = "#1F3552", alpha = 0.6) + scale_x_continuous(breaks = seq(0, 10, 0.5), limits=c(2, 8)) + geom_vline(xintercept=6, linetype="dashed", color = "red") + ggtitle("Histograma Escala de xm")
+```
+```{r}
+qplot(xm, data = dfMedidas, geom = "density", alpha = I(.5)) + labs(x = bquote(xm)) + geom_density(fill = "#4271AE", colour = "#1F3552", alpha = 0.6) + scale_x_continuous(breaks = seq(0, 10, 0.5), limits = c(2, 8)) + geom_vline(xintercept = 6, linetype="dashed", color = "red") + ggtitle("Distribución de Densidad Escala de xm")
+```
+
+Se aprecia que a medida que la escala del terremoto aumenta el número de terremotos de dicha escala disminuye, y viceversa.
+
+Se estandarizan las diferentes medidas de teremotos (excepto mw, ya que tiene muchos Na) y se comparan sus histogramas.
+```{r}
+h1 <- ggplot(data=dfMedidas, aes((xm - mean(xm)) / sd(xm))) + geom_histogram(breaks=seq(-3, 3, by = 0.5), col = "gray", fill = "green", alpha = 0.2) + labs(title = "Histograma") + labs(x = bquote(xm), y = "Cantidad")
+
+h2 <- ggplot(data=dfMedidas, aes((md - mean(md)) / sd(md))) + geom_histogram(breaks=seq(-3, 3, by = 0.5), col = "gray", fill = "green", alpha = 0.2) + labs(title = "Histograma") + labs(x = bquote("md (Magnitud de duración)"), y = "Cantidad")
+
+h3 <- ggplot(data=dfMedidas, aes((richter - mean(richter)) / sd(richter))) + geom_histogram(breaks=seq(-3, 3, by = 0.5), col = "gray", fill = "green", alpha = 0.2) + labs(title = "Histograma") + labs(x = bquote(richter), y = "Cantidad")
+
+h4 <- ggplot(data=dfMedidas, aes((ms - mean(ms)) / sd(ms))) + geom_histogram(breaks=seq(-3, 3, by = 0.5), col = "gray", fill = "green", alpha = 0.2) + labs(title = "Histograma") + labs(x = bquote("ms (Magnitud de ondas superficiales)"), y = "Cantidad")
+
+h5 <- ggplot(data=dfMedidas, aes((mb - mean(mb)) / sd(mb))) + geom_histogram(breaks=seq(-3, 3, by = 0.5), col = "gray", fill = "green", alpha = 0.2) + labs(title = "Histograma") + labs(x = bquote("mb (Magnitud de ondas de volumen)"), y = "Cantidad")
+```
+```{r}
+grid.arrange(h1, h2, h3, h4, h5, ncol = 2, nrow = 3)
+```
+
+Ponemos las diferentes medidas de xm en latitud y longitud para hacer un mapa de puntos con terremotos, usando diferentes colores para valores de xm mayores y menores que 5.5, además de aumentar el tamaño de los puntos a medida que aumenta la profundidad.
+```{r}
+ggplot(dfMedidas, aes(x = long, y = lat, size=depth, fill = xm < 5.5)) + ylab("Latitud") + xlab("Longitud") + geom_point(shape = 21) + ggtitle("Medida xm") + scale_size(range = c(1, 5))
+```
+
+Comparamos las diferentes medidas de fuerza de un terremoto con la profundidad.
+```{r}
+ggplot(dfMedidas, aes(x = depth, y = xm, fill = xm < 5.5)) + ylab("xm") + xlab("Profundidad") + geom_point(shape = 21) + ggtitle("Medida xm v Profundidad") + geom_hline(yintercept=6, linetype="dashed", color = "red")
+```
+```{r}
+ggplot(dfMedidas, aes(x = depth, y = md, fill = md < 5.5)) + ylab("md") + xlab("Profundidad") + geom_point(shape = 21) + ggtitle("Magnitud de duración (md) v Profundidad") + geom_hline(yintercept=6, linetype="dashed", color = "red")
+```
+```{r}
+ggplot(dfMedidas, aes(x = depth, y = richter, fill = richter < 5.5)) + ylab("Escala de richter") + xlab("Profundidad") + geom_point(shape = 21) + ggtitle("Escala de richter v Profundidad") + geom_hline(yintercept=6, linetype="dashed", color = "red")
+```
+```{r}
+ggplot(dfMedidas, aes(x = depth, y = ms, fill = ms < 5.5)) + ylab("ms") + xlab("Profundidad") + geom_point(shape = 21) + ggtitle("Magnitud de ondas superficiales (ms) v Profundidad") + geom_hline(yintercept=6, linetype="dashed", color = "red")
+```
+```{r}
+ggplot(dfMedidas, aes(x = depth, y = mb, fill = mb < 5.5)) + ylab("mb") + xlab("Profundidad") + geom_point(shape = 21) + ggtitle("Magnitud de ondas de volumen (mb) v Profundidad") + geom_hline(yintercept=6, linetype="dashed", color = "red")
+```
+
+Como se ha visto anteriormente, se puede apreciar que por lo general, la mayoría de terremotos se producen a poca o media profundidad y en la mayoría de los casos tienen una medida xm menor de ~ 5.5
+
+Pasamos "year" y "month" a numérico para poder compararlos.
+```{r}
+dfMedidas$year <- as.numeric(year)
+dfMedidas$month <- as.numeric(month)
+```
+
+Sacamos la medida de la importancia que tienen diferentes variables con respecto a xm, donde vemos que year es la más importante, pero cómo no debería tener mucho sentido saber el año en lo referente a predecir cuando se producirá un terremoto o de que magnitud será, consideraremos que la profundidad es la más importante.
+```{r}
+importancia <- calc.relimp(lm(xm ~ year + month + depth + lat + long + dist, data =
+dfMedidas), type = c("lmg", "last", "first", "betasq", "pratt", "genizi", "car"), rela = TRUE)
+importancia
+plot(importancia)
+```
+
+Hacemos lo mismo que la importancia anterior pero basados en la profundidad, donde sale que mb es la mas importante para determinar la profundidad.
+```{r}
+importancia <- calc.relimp(lm(depth ~ md + richter + mw + ms + mb, data =
+dfMedidas), type = c("lmg", "last", "first", "betasq", "pratt", "genizi", "car"), rela = TRUE)
+importancia
+plot(importancia)
+```
+
+Ejecutamos diferentes funciones para saber la importancia de los atributos en la tarea de predecir xm.
+```{r}
+set.seed(10)
+```
+```{r}
+atributos <- c("depth", "year", "month", "lat", "long", "dist")
+formula <- as.simple.formula(atributos, "xm")
+```
+```{r}
+importancia_SU <- symmetrical.uncertainty(formula, dfMedidas) #medidas para ranking
+importancia_IG <- information.gain(formula, dfMedidas)
+importancia_GR <- gain.ratio(formula, dfMedidas)
+resultado_ranking <- data.frame(importancia_SU, importancia_IG, importancia_GR)
+names(resultado_ranking) <- c("Symmetrical Uncertainty", "Information Gain", "Gain Ratio")
+round(resultado_ranking,2)
+```
+```{r}
+plot(resultado_ranking$`Symmetrical Uncertainty`, resultado_ranking$`Information Gain`)
+
+text(x = resultado_ranking$`Symmetrical Uncertainty`, y = resultado_ranking$`Information Gain`+ 0.0075, cex = 0.75, labels = row.names(resultado_ranking), col="red")
+
+plot(resultado_ranking$`Symmetrical Uncertainty`, resultado_ranking$`Gain Ratio`)
+
+text(x = resultado_ranking$`Symmetrical Uncertainty`, y = resultado_ranking$`Gain Ratio`+
+0.0075, cex = 0.75, labels = row.names(resultado_ranking), col="red")
+
+plot(resultado_ranking$`Information Gain`, resultado_ranking$`Gain Ratio`)
+
+text(x = resultado_ranking$`Information Gain`, y = resultado_ranking$`Gain Ratio`+
+0.0075, cex = 0.75, labels = row.names(resultado_ranking), col="red")
+```
+
+Además, también usamos random forest.
+```{r}
+rf_imp <- random.forest.importance(formula, dfMedidas, importance.type = 1)
+print(rf_imp)
+```
+
+En todas se puede observar que la variable más significativa es el año, seguido de la profundidad, y después las demás, siendo el mes la menos significativa.
+
+Intentamos encontrar la mejor combinación de atributos, indicándonos CSF que la mejor combinación es la profundidad sin ningún atributo adicional, e indicándonos CON que la mejor combinación es la compuesta por: "depth", "year", "lat", "long" y "dist". Por tanto, consideramos que no hay un consenso, y que no se puede sacar ninguna conclusión.
+```{r}
+subset_CFS <- cfs(formula, dfMedidas)
+subset_CON <- consistency(formula, dfMedidas)
+print("CFS")
+subset_CFS
+print("CON")
+subset_CON
+```
+
+Llegados a este punto, vamos a aplicar reducción de la dimensionalidad. Para ello vamos a utilizar además de la latitud, longitud y profundidad, "country", "city", "area" y "direction", para ver que tal predicen el intervalo xm de los terremotos. Para poder utilizar estos últimos, necesitamos convertirlos en integer, quitar los valores nulos, y estandarizar todas las variables para que sean comparables.
+```{r}
+atr <- c("depth", "country", "city", "area", "direction", "lat", "long")
+df <- dfMedidas[ , names(dfMedidas) %in% c(atr, "xm_Interval")]
+```
+```{r}
+df$country <- as.integer(df$country)
+df$city <- as.integer(df$city)
+df$area <- as.integer(df$area)
+df$direction <- as.integer(df$direction)
+df$xm_Interval <- as.integer(df$xm_Interval)
+```
+```{r}
+df <- na.omit(df) #eliminamos instancias si no tienen algún valor
+```
+```{r}
+df_scale <- as.data.frame(scale(df)) # estandarizamos los atributos
+```
+
+Ahora que tenemos preparados los datos, vamos a sacar los componentes principales y su importancia.
+```{r}
+df.pca <- princomp(df_scale[,-8], cor = TRUE, scores = TRUE, covmat = NULL)
+```
+```{r}
+summary(df.pca)
+```
+```{r}
+fviz_screeplot(df.pca, addlabels = TRUE)
+```
+
+Se puede ver que el primer componente principal explica el 42.5% de la variabilidad de los datos, y junto al segundo (16.2%), suma el 58.7%.
+
+Vemos el número óptimo de componentes principales a tener en cuenta.
+```{r}
+ev <- get_eig(df.pca)[1] #los autovalores
+ap <- parallel(subject=nrow(df_scale),var=ncol(df_scale[, -8]), rep=100, cent=.05)
+nS <- nScree(x=ev$eigenvalue, aparallel=ap$eigen$qevpea)
+plotnScree(nS)
+```
+
+Tres de las cuatro medidas nos indican que lo mejor es tener en cuenta los dos primeros, por lo que las dimensiones se reducen de 7 a 2, realizando combinaciones lineales de los anteriores atributos.
+
+Obtenemos un gráfico biplot, donde vamos a examinar los atributos con su signo, distancia al origen y ángulo con los ejes de los dos primeros componentes principales. De esta forma podremos obtener la correlación y calidad de representación que existe entre los atributos y dichos componentes principales.
+
+Los atributos que estén correlados entre sí, se encontrarán próximos en ángulo, y su calidad de representación, correlación y contribución con cada dimensión, se medirán teniendo en cuenta la proximidad de los atributos a cada eje de coordenadas, además de lo cerca que estén dichos atributos del círculo unidad, siendo el eje X la primera componente principal y el eje Y la segunda.
+```{r}
+fviz_pca_var(df.pca)
+```
+
+Se puede apreciar que todos excepto la latitud y la profundidad contribuyen bastante al primer componente principal, aunque la longitud al estar lejos del circulo unidad, no tanto.
+
+En lo referente al segundo componente principal, se puede apreciar que la latitud y la profundidad contribuyen bastante, teneiendo la profundidad una correlación inversa con la latitud, y se podría decir que "country" también contribuye, al estar tan cerca del ciculo uunidad, aunque mucho menos que las otras dos.
+
+Vemos la contribución de los atributos a los dos primeros componentes principales por medio de gráficos.
+```{r}
+fviz_contrib(df.pca, choice = "var", axes = 1)
+fviz_contrib(df.pca, choice = "var", axes = 2)
+```
+
+Se ratifica la explicación que hemos realizado del biplot.
+
+Ejecutamos otro biplot, pero esta vez con las instancias y los atributos, con diferente color cada intervalo de xm.
+```{r}
+fviz_pca_biplot(df.pca, habillage = dfMedidas$xm_Interval)
+```
+
+Se aprecia que las tres clases están completamente solapadas.
+
+Al representarlo con elipses, se sigue apreciando que las tres clases están completamente solapadas.
+```{r}
+fviz_pca_ind(df.pca, label="none", habillage = dfMedidas$xm_Interval, addEllipses=TRUE, ellipse.level=0.90)
+```
+
+
+En vista de que nuestros datos no son muy buenos para hacer clasificación, vamos a probar con la clusterización.
+
+Usamos los mismos atributos que en la reducción de atributos, solo que esta vez utilizamos "xm" en vez de "xm_Interval", y al igual que antes, pasamos los atributos necesarios a integer, eliminamos los valores nulos, y estandarizamos todos los atributos.
+```{r}
+df_CLUS <- dfMedidas[ , names(dfMedidas) %in% c(atr, "xm")]
+```
+```{r}
+df_CLUS$country <- as.integer(df_CLUS$country)
+df_CLUS$city <- as.integer(df_CLUS$city)
+df_CLUS$area <- as.integer(df_CLUS$area)
+df_CLUS$direction <- as.integer(df_CLUS$direction)
+df_CLUS$xm <- as.integer(df_CLUS$xm)
+```
+```{r}
+df_CLUS <- na.omit(df_CLUS) #eliminamos instancias si no tienen algún valor
+```
+```{r}
+df_CLUS_scale <- as.data.frame(scale(df_CLUS)) # estandarizamos los atributos
+```
+
+Realizamos una agrupación jerárquica de las instancias de datos.
+```{r}
+distancia <- dist(df_CLUS_scale, method = "euclidean") #matriz de distancias euclídeas
+```
+```{r}
+clus_hc <- hclust(distancia, method= "ward.D2")
+```
+```{r}
+plot(clus_hc)
+```
+
+Se aprecian una gran cantidad de agrupaciones. Lo que habría que hacer ahora es determinar cual es el número óptimo de agrupamientos.
+
+Antes de eso, realizaremos varias representaciones. Una de ellas, será otra agrupación jerárquica, pero esta vez sobre el conjunto de datos transpuesto para ver que atributos están más próximos entre sí.
+```{r}
+distanciaT <- dist(t(df_CLUS_scale), method = "euclidean") #matriz de distancias euclídeas
+```
+```{r}
+clus_hcT <- hclust(distanciaT, method="ward.D")
+```
+```{r}
+fviz_dend(clus_hcT)
+```
+
+Se aprecia una agrupación entre la profundidad y la medida xm, y otra entre las medidas de posición, estándo más próximas entre sí por un lado la latitud y la longitud, y por otro las demás medidas, estándo dentro de estas más próximos los atributos "country" y "direction", y la agrupación de estos con "city", para finalmente estar esta agrupación próxima con "area".
+
+Hacemos una representación de las instancias en los ejes de los dos primeros componentes principales.
+```{r}
+fviz_pca_ind(prcomp(df_CLUS_scale), title = "Componentes Principales", geom = "point")
+```
+
+Se puede ver que las instancias no se distribuyen de forma aleatoria, pero no se aprecia ninguna agrupación que sea demasiado clara.
+
+En cuanto a la determinación del número óptimo de agrupamientos, debemos destacar que no nos ha sido posible usar ningún método diferente de "CLARA", el cual sirve para muestras grandes de datos, ya que usando los demás, como "k-means" o "PAM", nuestro ordenador no era capaz de ejecutar los métodos o representaciones, bloqueándonos el ordenador en muchas ocasiones, y sacándonos un error indicativo de falta de memeoria RAM en otras. También destacar que con el método "CLARA", a pesar de darnos un resultado satisfactorio, nos tarda varias horas en ejecutar.
+
+Usándo el método "CLARA", determinamos un posible número óptimo de agrupamientos, el cual es 3.
+```{r}
+fviz_nbclust(df_CLUS_scale, clara, method = "gap_stat")
+```
+
+Volvemos a mostrar la agrupación jerárquica, pero esta vez dividiendo los datos en 3 grupos por medio de recuadros de colores.
+```{r}
+plot(clus_hc, cex = 0.6) # plot tree
+rect.hclust(clus_hc, k = 3, border = 2:5) # add rectangle
+```
+
+Pensamos que tiene bastante sentido dividir los datos en 3 grupos, ya que en la agrupación jerárquica se aprecian los 3 grupos claramente, aunque también podrían haber sido 2 debido a los dos grandes grupos que se observan.
+
+Representamos en los ejes de los dos primeros componentes principales, la asociación de los atributos a las 3 clases obtenidas, usando k-medias.
+```{r}
+km.res <- kmeans(df_CLUS_scale, 3, nstart = 25)
+fviz_cluster(km.res, data = df_CLUS_scale, ellipse.type = "convex")
+```
+
+Se aprecia bastante solapamiento de las clases 1 y 2, y un poco de estas con la 3.
+
+Probamos a repetir la representación, pero dividiendo los atributos en 2 clases.
+```{r}
+km.res <- kmeans(df_CLUS_scale, 2, nstart = 25)
+fviz_cluster(km.res, data = df_CLUS_scale, ellipse.type = "convex")
+```
+
+No se aprecia bien cuanto solapamiento hay, pero se ve que están al menos algo solapadas.
+
+Ahora procedemos a hacer un estudio completo con el método "CLARA".
+
+Primero veremos que tal se ajustan los datos a las 3 clases que hemos obtenido.
+```{r}
+df_clara <- clara(df_CLUS_scale, 3)
+```
+
+Representamos la asociación de los atributos a las 3 clases obtenidas, en los ejes de los dos primeros componentes principales.
+```{r}
+fviz_cluster(df_clara, stand = T, geom = "point", pointsize = 1)
+```
+
+Se aprecia solapamiento entre las 3 clases, sobre todo entre la 2 y la 3, pero se observa que hay muchos datos que está claro a que clase pertenecen.
+
+Representamos dos gráficos "Silhouete" diferentes. Si las medidas se acercan a 1, significará que los datos están bien agrupados, y si se acercan a -1 que están mal agrupados.  
+```{r}
+plot(silhouette(df_clara),  col = 2:3, main = "Silhouette plot")
+```
+```{r}
+fviz_silhouette(df_clara)
+```
+
+Determinamos que los resultados son bastante buenos, y que los datos están bastante bien agrupados, ya que casi todos los valores de silueta son positivos, incluso llegando a 0.67 el de la clase 3.
+
+Si agruparamos los datos en 2 clases estos serían los resultados:
+
+```{r}
+df_clara2 <- clara(df_CLUS_scale, 2)
+```
+
+Representamos la asociación a 2 clases de los atributos, en los ejes de los dos primeros componentes principales.
+```{r}
+fviz_cluster(df_clara2, stand = T, geom = "point", pointsize = 1)
+```
+
+Se sique apreciando solapamiento entre las clases, aunque también se observa en este caso que hay muchos datos que está claro a que clase pertenecen.
+
+Representamos los dos gráficos "Silhouete".  
+```{r}
+plot(silhouette(df_clara2),  col = 2:3, main = "Silhouette plot")
+```
+```{r}
+fviz_silhouette(df_clara2)
+```
+
+Se puede apreciar que las medias son peores que cuando dividíamos los datos en 3 clases, ya que se observan más medidas negativas y la media es inferior siendo esta 0.24 frente a los 0.36 de la situación con 3 clases.
+
+Por tanto consideramos que lo más óptimo es hacer 3 agrupaciones.
+
+
+Por último, vamos a realizar un estudio acerca de como han cambiado las medidas xm de los terremotos a lo largo de los años de los que tenemos constancia, usando para ello series temporales.
+
+Para llevar acabo esta tarea, hemos tenido que crear un nuevo conjunto de datos, en el que la primera columna contiene los años, y las 12 restantes las medias de xm para cada mes de cada año. (Hemos añadido los meses que no aparecían en nuestro datagrama, y hemos puesto ceros como valor de su media de xm para ese mes y ese año) 
+```{r}
+dfMediaXm <- read.csv("earthquake_xm_average.csv", sep = ",", dec = ".", header = TRUE)
+```
+```{r}
+dfMediaXm
+```
+
+Pensamos que el hecho de que haya meses sin medidas de terremoto se podría deber a dos razones: que no hubo ningún terremoto en esos meses, o que no se tiene constancia de ello. Teniendo en cuenta que esto solo ocurre hasta 1963 y luego en 2017, está bastante claro que se debe a lo segundo.
+
+Antes de empezar con el estudio, decir que no hemos tenido en cuenta los años que tienen meses con valor 0, ya que pensamos que no representan adecuadamente la realidad. Por tanto, nuestro modelo empezará en el año 1964 y terminará en el año 2016, siendo este último el año que intentaremos predecir a partir de los anteriores.
+
+Tomamos el año 2016 como el año a predecir, y creamos un vector con las medidas mensuales de los años restantes.
+```{r}
+df_xm_2016 <- dfMediaXm[107,2:13] #Usamos el año 2016 para comparar
+df_xm_MED <- as.vector(t(dfMediaXm[55:106,2:13]))
+```
+
+Transformamos los datos a la estructura de serie temporal con ts, y representamos dos gráficos; uno con todas las medidas desde 1964 hasta 2015; y otro con las medidas de 2016.
+```{r}
+ts_xm_MED <- ts(df_xm_MED, frequency = 12, start = 1964)
+ts_xm_2016 <- ts(t(df_xm_2016), frequency = 12, start = 2016)
+ts.plot(ts_xm_MED)
+ts.plot(ts_xm_2016)
+```
+
+De momento no podemos sacar ninguna conclusión, pero se aprecia que por lo general a medida que pasan los años la media de xm va disminuyendo de forma muy irregular, hasta que en algún momento entre 1995 y el 2000, empieza a aumentar poco a poco.
+
+Sacamos otros dos gráficos, pero esta vez representando los valores por frecuencia, de manera que cada año sea una serie, con un color más oscuro para los años más antiguos y un color más claro para los más modernos. Uno de ellos está representado en coordenadas lineales, y el otro con una coordenada polar.
+```{r}
+ggseasonplot(ts_xm_MED, continuous = TRUE)
+ggseasonplot(ts_xm_MED, continuous = TRUE, polar = TRUE)
+```
+
+Se puede apreciar que en los años más antiguos hay bastante más irregularidad en las medidas que en los más modernos, además de apreciarse de forma clara que las medidas de estos últimos años son más bajas que las de los primeros.
+
+Mostramos los valores por subseries mensuales a través de otro gráfico.
+```{r}
+ggsubseriesplot(ts_xm_MED)
+```
+
+De este gráfico, se puede resaltar que la media de cada mes es muy parecida, por lo que se puede afirmar que no hay ninguna relación entre los meses y la magnitud de los terremotos. Además, se aprecia claramente lo que expusimos en la primera gráfica.
+
+En el siguiente gráfico mostramos una representación del gráfico de dispersión del dato en un instante t frente al dato retrasado en un instante t-lag(n). Los colores indican los meses.
+
+Con este gráfico intentaremos encontrar cual es la frecuencia con que nuestros datos se repiten o se parecen, si es que hay alguna.
+```{r}
+gglagplot(ts_xm_MED, do.lines = FALSE, lags = 12) + geom_point(size = 0.1, stroke = 0)
+```
+
+La frecuencia se puede estimar a partir del valor de retraso (lag) en el que la correlación es máxima, pero como se puede observar, todos tienen una correlación similar, por lo que no se puede afirmar que haya ningún tipo de frecuencia.
+
+Gracias a la función acf, calculamos la autocovarianza y la autocorrelación parcial.
+```{r}
+ggAcf(ts_xm_MED)
+```
+
+Sigue sin apreciarse ninguna frecuencia, ya que nuestros datos rara vez se repiten o se parecen.
+
+Representamos la serie en el dominio de las frecuencias para intentar determinar la frecuencia dominante.
+```{r}
+spectrum(ts_xm_MED)
+```
+
+El mayor pico ocurre fuera de nuestra frecuencia de 12 meses, por lo que al menos se puede afirmar que los datos no se van a parecer si miramos el mismo mes en diferentes años, lo que ratifica nuestra afirmación de que no existe ninguna relación entre los meses y la magnitud de los terremotos.
+
+Volvemos a usar la función acf, pero utilizando los mayores valores de lag que nos permiten nuestros datos.
+```{r}
+ggAcf(ts_xm_MED, lag = 700)
+```
+
+Se aprecia claramente que nuestros datos no se repiten, por lo que se puede afirmar que no existe una frecuencia a la que se repitan o se parezcan nuestros datos, a no ser que esa frecuencia sea 1, o en un caso muy improbable, que sea mucho mayor que el periodo de tiempo del que tenemos datos.
+
+Mostramos el resultado de la descomposición de las componentes de la serie temporal en un modelo aditivo, usando medias móviles y regresión local (LOES), y a partir de ello, establecemos una regresión para la tendencia.
+```{r}
+ts_xm_MED_desc <- decompose(ts_xm_MED, type = "additive")
+autoplot(ts_xm_MED_desc)
+```
+```{r}
+ts_xm_MED_stl <- stl(ts_xm_MED, s.window = "periodic")
+autoplot(ts_xm_MED_stl)
+```
+```{r}
+autoplot(ts_xm_MED_stl$time.series[,2]) +
+stat_smooth(method = "lm", aes(color = "Lineal"), se = TRUE, level = 0.95) +
+stat_smooth(method = "loess" , aes(color = "LOESS"), se = TRUE, level = 0.95)
+```
+
+Con la regresión lineal se aprecia claramente la disminución de xm a medida que pasan los años, y con la regresión local se observa la tendencia que conseguimos apreciar en un principio, en la que xm disminuye hasta mitad de los años 90, y entonces empieza a aumentar poco a poco.
+
+Ahora vamos a apilcar unos cuantos métodos para intentar predecir las medidas xm del año 2016.
+
+Primero aplicamos un método naive, que predice la parte de tendencia para posteriormente aplicarla a los datos desestacionalizados. Sólo mostramos desde el año 2010, para que se vean bien los datos predichos.
+```{r}
+fit_naive_ts <- stlf(ts_xm_MED, method = "naive", h = 12, s.window = 2, robust = TRUE)
+autoplot(fit_naive_ts, xlim = c(2010, 2017))
+```
+
+Usamos el método Holt-Winters para hacer suavizado exponencial, que da menos peso a los datos cuanto más antiguos sean.
+```{r}
+fit_HW_ts <- hw(ts_xm_MED, h = 12)
+autoplot(fit_HW_ts, xlim = c(2010, 2017))
+```
+
+Los métodos de suavizado exponencial demandandan, que los errores en el intervalo de
+predicción, estén distribuidos según una normal de media cero, por lo que los errores
+no están correlados y la varianza es constante.
+
+Se puede utilizar la correlación del error para mejorar la estimación del modelo de predicción usando ARIMA, pero para ello, los datos de la serie se deben preparar.
+
+En las gráficas siguientes mostramos la serie preparada para aplicar ARIMA. En la primera se muestra la transformación de la serie para poder aplicar dicho método, y en la segunda la autocorrelación de la serie transformada.
+```{r}
+ts_xm_MED_ARIMA <- diff(ts_xm_MED, differences = 12)
+autoplot(ts_xm_MED_ARIMA)
+ggAcf(ts_xm_MED_ARIMA)
+```
+
+Ya podemos aplicar ARIMA.
+```{r}
+fit_ARIMA_model <- auto.arima(ts_xm_MED, stepwise = FALSE, approximation = FALSE)
+fit_ARIMA_ts <- forecast(fit_ARIMA_model)
+autoplot(fit_ARIMA_ts, xlim = c(2010, 2017))
+```
+
+Finalmente, aplicamos el modelo TBATS, que es una extensión del modelo de suavizado exponencial, y también obtiene un modelo ARIMA.
+```{r}
+fit_TBATS_model <- auto.arima(ts_xm_MED)
+fit_TBATS_ts <- forecast(fit_TBATS_model)
+autoplot(fit_TBATS_ts, xlim = c(2010, 2017))
+```
+
+representamos en una gráfica con los valores reales y los predichos por cada uno de
+los métodos a ver cual predice mejor la realidad.
+```{r}
+ts.plot( fit_naive_ts$mean, fit_naive_ts$lower, fit_naive_ts$upper,
+fit_HW_ts$mean, fit_HW_ts$lower, fit_HW_ts$upper,
+fit_ARIMA_ts$mean, fit_ARIMA_ts$lower, fit_ARIMA_ts$upper,
+fit_TBATS_ts$mean, fit_TBATS_ts$lower, fit_TBATS_ts$upper,
+ts_xm_2016,
+col = c(2,2,0,2,0,3,3, 0, 3, 0, 4, 4, 0, 4, 0, 5, 5, 0, 5, 0, 1),
+lty = c(1,2,2,2,2, 1, 2, 2, 2, 2, 1, 2, 2, 2, 2, 1, 2, 2, 2, 2, 1),
+lwd = c(2,0.5,0.5,0.5, 0.5, 2, 0.5, 0.5, 0.5, 0.5, 2, 0.5, 0.5, 0.5, 0.5, 2, 0.5, 0.5, 0.5, 0.5, 2),
+gpars=list(xaxt="n"),
+xlab = "Mes", ylab = "xm medio")
+points(seq(2015,2016-(1/12),by=1/12),fit_naive_ts$mean[1:12],pch=19, col = 2)
+points(seq(2016,2017-(1/12),by=1/12),fit_HW_ts$mean[1:12],pch= 19, col = 3)
+points(seq(2016,2017-(1/12),by=1/12),fit_ARIMA_ts$mean[1:12],pch= 19, col = 4)
+points(seq(2016,2017-(1/12), by=1/12),fit_TBATS_ts$mean[1:12],pch= 19,col = 5)
+points(seq(2016,2017-(1/12), by=1/12), ts_xm_2016[1:12], pch = 19, col = 1)
+axis(1 ,at=seq(2016,2017-(1/12), by=1/12), labels=c("ENE", "FEB", "MAR", "ABR", "MAY",
+"JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"))
+legend("topleft", legend = c("Naive","Holt-Winters","ARIMA", "TBATS", "Real"),
+col = c(2, 3, 4, 5, 1), lty = 1, text.width = 0.2, cex = 0.5)
+title("Predicción media xm 2016", cex.main = 1, sub = "Intervalo 95%", cex.sub = 1)
+```
+
+Se puede ver que ningún modelo se acerca mucho a la realidad, ya que todos menos Naive predicen que las medidas serán mas o menos constantes, cuando en realidad no lo son, y Naive predice por lo general medidas mas bajas que las reales. Pero hay que tener en cuenta que los datos de las medias de xm están guardados con muchos decimales, por lo que la estimación de todos los modelos no se aleja tanto de la realidad.
+
+Lo veremos comparamos la precisión, tanto en entrenamiento como en validación, de las diferentes
+técnicas utilizadas.
+```{r}
+rmse_nv <- forecast::accuracy(fit_naive_ts)[2]
+rmse_hw <- forecast::accuracy(fit_HW_ts)[2]
+rmse_ar <- forecast::accuracy(fit_ARIMA_model)[2]
+rmse_tb <- forecast::accuracy(fit_TBATS_model)[2]
+par(mfrow=c(2,1))
+barplot(c(rmse_nv, rmse_hw, rmse_ar, rmse_tb), names.arg = c("Naive", "HW", "Arima",
+"TBATS"), ylim = c(0, 3), main = "RMSE entrenamiento 1912-2015")
+text(c(0.7,1.9,3.1,4.3), 0.3 + round(c(rmse_nv, rmse_hw, rmse_ar, rmse_tb), 1), labels
+= round(c(rmse_nv, rmse_hw, rmse_ar, rmse_tb), 1))
+barplot(c(rmse(ts_xm_2016, fit_naive_ts$mean), rmse(ts_xm_2016, fit_HW_ts$mean), rmse(ts_xm_2016,
+fit_ARIMA_ts$mean), rmse(ts_xm_2016, fit_TBATS_ts$mean)), names.arg = c("Naive", "HW",
+"Arima", "TBATS"), ylim = c(0, 3), main = "RMSE año 2016")
+text(c(0.7,1.9,3.1,4.3), 0.3 + round(c(rmse(ts_xm_2016, fit_naive_ts$mean), rmse(ts_xm_2016,
+fit_HW_ts$mean), rmse(ts_xm_2016, fit_ARIMA_ts$mean), rmse(ts_xm_2016, fit_TBATS_ts$mean)),
+1), labels = round(c( rmse(ts_xm_2016, fit_naive_ts$mean), rmse(ts_xm_2016, fit_HW_ts$mean),
+rmse(ts_xm_2016, fit_ARIMA_ts$mean), rmse(ts_xm_2016, fit_TBATS_ts$mean)), 1))
+```
+
+Se puede observar que todos excepto Naive en validación (0.2), tienen un error de 0.1, por lo que consideramos que se ha hecho una buena estimación de la media de xm para los meses del año 2016.
+
+Por último, observamos si hay algún dato anómalo.
+```{r}
+outliers <- bfast(ts_xm_MED, h=0.15, max.iter=1)
+outliers
+plot(outliers)
+```
+
+No lo hay, pero se aprecian dos discontinuidades en la tendencia: una alrededor de la mitad de los años 70, donde empieza a disminuir xm más despacio que hasta ese momento, u otra a mitad de los años 90, donde xm empieza a aumentar.
+
+Cómo conclusión del estudio total de la práctica, pensamos que es complicado predecir cuando y donde se producirán los terremotos y de que escala serán, ya que ningún atributo por si sólo ha sido capaz de predecir muy bien estos datos, y hemos descubierto además que la mejor manera de predecir su magnitud es estudiar la magnitud de los terremotos que han acontecido en el pasado. 
